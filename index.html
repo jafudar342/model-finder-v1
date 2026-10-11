@@ -1,0 +1,1614 @@
+<!DOCTYPE html>
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>ModelFinder — Scientific Open-Weight Model Discovery with Community Reviews</title>
+<!-- Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            canvas: '#0B0F19',
+            surface: '#111827',
+            surfaceHover: '#1F2937',
+            surfaceBorder: 'rgba(255, 255, 255, 0.08)',
+            cyanAccent: '#06B6D4',
+            cyanGlow: '#22D3EE',
+            violetAccent: '#8B5CF6',
+          },
+          fontFamily: {
+            sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
+            mono: ['JetBrains Mono', 'ui-monospace', 'monospace'],
+          }
+        }
+      }
+    };
+  </script>
+<!-- React 18 & ReactDOM -->
+<script crossorigin="" src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin="" src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<!-- Babel for TSX / JSX parsing -->
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<!-- Inter & JetBrains Mono Fonts -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet"/>
+<style>
+  .searching-banner {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 3rem 1.5rem;
+    text-align: center;
+    background: rgba(17, 24, 39, 0.7);
+    border: 1px dashed rgba(6, 182, 212, 0.35);
+    border-radius: 16px;
+    margin: 1rem 0;
+  }
+
+  .searching-spinner {
+    width: 44px;
+    height: 44px;
+    border: 3px solid rgba(255, 255, 255, 0.1);
+    border-top-color: #06B6D4;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    margin-bottom: 1rem;
+  }
+
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+
+  body {
+    background-color: #0B0F19;
+    color: #F1F5F9;
+    font-family: 'Inter', sans-serif;
+    overflow-x: hidden;
+  }
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: #0B0F19;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #1F2937;
+    border-radius: 9999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #374151;
+  }
+</style>
+</head>
+<body class="bg-[#0B0F19] text-slate-100 min-h-screen selection:bg-cyan-500/20 selection:text-cyan-300">
+<div id="root"></div>
+<script type="text/babel">
+  const { useState, useEffect, useMemo, useRef } = React;
+
+  const INITIAL_REVIEWS_BY_MODEL = {
+    "mod-01": [
+      {
+        id: "rev-01-1",
+        username: "Dr. Alan T.",
+        userRole: "Microbiome Genomics Lab",
+        rating: 5,
+        date: "2 weeks ago",
+        comment: "Great performance on 16S data, but requires strict formatting of the sequence header tokens. Embeddings clustered gut cohorts accurately in our benchmark.",
+        helpfulCount: 14
+      },
+      {
+        id: "rev-01-2",
+        username: "BioInformatics_Lead",
+        userRole: "Metagenomics Core",
+        rating: 4,
+        date: "1 month ago",
+        comment: "Reproduction notebook runs smoothly on single A100 GPU. Quantized weights are compact and yield comparable cross-entropy scores.",
+        helpfulCount: 9
+      },
+      {
+        id: "rev-01-3",
+        username: "DataSci_99",
+        userRole: "BioML Researcher",
+        rating: 5,
+        date: "1 month ago",
+        comment: "Clean Hugging Face checkpoint loading. Foundational taxonomy distributions aligned with SILVA reference sets seamlessly.",
+        helpfulCount: 5
+      }
+    ],
+    "mod-02": [
+      {
+        id: "rev-02-1",
+        username: "Elena R. (CFD)",
+        userRole: "Aerodynamics Postdoc",
+        rating: 5,
+        date: "10 days ago",
+        comment: "Conservation of mass residual losses converge remarkably fast with JAX. Tested on irregular NACA airfoils with stable velocity gradients.",
+        helpfulCount: 18
+      },
+      {
+        id: "rev-02-2",
+        username: "Marcus V.",
+        userRole: "Fluid Mechanics Engineer",
+        rating: 5,
+        date: "3 weeks ago",
+        comment: "Weights are intact and the JAX/Flax implementation is clean. High spectral accuracy across Reynolds numbers up to 10^5.",
+        helpfulCount: 11
+      }
+    ],
+    "mod-03": [
+      {
+        id: "rev-03-1",
+        username: "PharmaChemist_K",
+        userRole: "Medicinal Chemistry",
+        rating: 4,
+        date: "3 weeks ago",
+        comment: "Solid SE(3)-equivariant GNN. Blood-brain barrier classification matches literature values within 2% margin. SMILES parser is robust.",
+        helpfulCount: 8
+      }
+    ]
+  };
+
+  const DEFAULT_SAMPLE_REVIEWS = [
+    {
+      id: "rev-def-1",
+      username: "Dr. Alan T.",
+      userRole: "Computational Science",
+      rating: 5,
+      date: "2 weeks ago",
+      comment: "Great reproduction fidelity. Weights verified and matched benchmark validation metrics reported in the paper repository.",
+      helpfulCount: 8
+    },
+    {
+      id: "rev-def-2",
+      username: "DataSci_99",
+      userRole: "Open Science Contributor",
+      rating: 4,
+      date: "3 weeks ago",
+      comment: "Weights are intact but the inference script is slightly outdated for latest drivers. Runs smoothly once requirements.txt is pinned.",
+      helpfulCount: 5
+    }
+  ];
+
+  const SAMPLE_MODELS = [
+    {
+      "id": "gh-593782352",
+      "model_name": "physicsnemo",
+      "source": "GitHub",
+      "primary_domain": "Physics",
+      "sub_domain": "Applied Physics",
+      "tags": ["#deep-learning", "#machine-learning", "#nvidia-gpu", "#nvidia-warp", "#physics"],
+      "framework": "PyTorch",
+      "hardware_req": "Check Repository",
+      "vram_gb": 16,
+      "description": "Open-source deep-learning framework for building, training, and fine-tuning deep learning models using state-of-the-art Physics-ML methods",
+      "sample_stats": "\u2b50 3,332 stars",
+      "sample_engagement_num": 3332,
+      "last_updated": "2026-10-09",
+      "health_tier": "A",
+      "health_score": 80,
+      "review_count": 0
+    },
+    {
+      "id": "gh-10994345",
+      "model_name": "root",
+      "source": "GitHub",
+      "primary_domain": "Physics",
+      "sub_domain": "Applied Physics",
+      "tags": ["#c-plus-plus", "#cling", "#data-analysis", "#geometry", "#graphics"],
+      "framework": "Other",
+      "hardware_req": "Check Repository",
+      "vram_gb": 16,
+      "description": "The official repository for ROOT: analyzing, storing and visualizing big data, scientifically",
+      "sample_stats": "\u2b50 3,309 stars",
+      "sample_engagement_num": 3309,
+      "last_updated": "2026-10-09",
+      "health_tier": "B",
+      "health_score": 70,
+      "review_count": 0
+    },
+    {
+      "id": "gh-43098215",
+      "model_name": "deepchem",
+      "source": "GitHub",
+      "primary_domain": "Biology",
+      "sub_domain": "Computational Biology",
+      "tags": ["#biology", "#deep-learning", "#drug-discovery", "#hacktoberfest", "#materials-science"],
+      "framework": "Other",
+      "hardware_req": "Check Repository",
+      "vram_gb": 16,
+      "description": "Democratizing Deep-Learning for Drug Discovery, Quantum Chemistry, Materials Science and Biology",
+      "sample_stats": "\u2b50 7,048 stars",
+      "sample_engagement_num": 7048,
+      "last_updated": "2026-10-09",
+      "health_tier": "B",
+      "health_score": 70,
+      "review_count": 0
+    },
+    {
+      "id": "gh-592851523",
+      "model_name": "nucleotide-transformer",
+      "source": "GitHub",
+      "primary_domain": "Biology",
+      "sub_domain": "Computational Biology",
+      "tags": ["#biology", "#deep-learning", "#dna", "#foundation-models", "#genomics"],
+      "framework": "Other",
+      "hardware_req": "Check Repository",
+      "vram_gb": 16,
+      "description": "Foundation Models for Genomics & Transcriptomics",
+      "sample_stats": "\u2b50 923 stars",
+      "sample_engagement_num": 923,
+      "last_updated": "2026-10-07",
+      "health_tier": "A",
+      "health_score": 80,
+      "review_count": 0
+    }
+  ];
+
+  const getHealthConfig = (tier, score) => {
+    if (tier === 'A+' || tier === 'A') {
+      const label = tier === 'A+' ? 'Highly Active' : 'Active';
+      return {
+        label,
+        colorClass: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:border-emerald-400/60',
+        dotClass: 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)] animate-pulse'
+      };
+    }
+    if (tier === 'B') {
+      return {
+        label: 'Maintained',
+        colorClass: 'bg-amber-500/10 text-amber-400 border-amber-500/30 hover:border-amber-400/60',
+        dotClass: 'bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.5)]'
+      };
+    }
+    return {
+      label: 'Stagnant',
+      colorClass: 'bg-rose-500/10 text-rose-400 border-rose-500/30 hover:border-rose-400/60',
+      dotClass: 'bg-rose-400 shadow-[0_0_8px_rgba(244,63,94,0.5)]'
+    };
+  };
+
+  const ModelHealthBadge = ({ tier, score, compact = false }) => {
+    const config = getHealthConfig(tier, score);
+    return (
+      <div
+        title="Synthesized health rating based on commit recency, issue resolution rate, community downloads, and open documentation."
+        className={`group/health relative inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-xl border text-xs font-mono font-medium transition-colors cursor-help shadow-sm ${config.colorClass}`}
+      >
+        <span className={`w-2 h-2 rounded-full inline-block shrink-0 ${config.dotClass}`}></span>
+        <span>
+          {tier} <span className="text-[11px] opacity-90">({score}/100</span>
+          {!compact && <span className="text-[11px] opacity-75"> · {config.label}</span>}
+          <span className="text-[11px] opacity-90">)</span>
+        </span>
+      </div>
+    );
+  };
+
+  const StarRatingDisplay = ({ rating, size = "text-xs" }) => {
+    return (
+      <div className={`inline-flex items-center space-x-0.5 text-amber-400 ${size}`} title={`${rating} of 5 Stars`}>
+        {[1, 2, 3, 4, 5].map(idx => (
+          <span key={idx}>{idx <= rating ? '★' : '☆'}</span>
+        ))}
+      </div>
+    );
+  };
+
+  const POPULAR_SEARCHES = [
+    "Physics-Informed Neural Nets (PINN)",
+    "Gut Microbiome ASV Transformer",
+    "Molecular Property GNN",
+    "Climate Emulation ViT",
+    "Brain MRI 3D-UNet"
+  ];
+
+  const DOMAIN_SHORTCUTS = [
+    { name: "Physics", count: "~1,400 Models", icon: "⚛️", sub: "Fluid dynamics, quantum & astrophysics" },
+    { name: "Chemistry", count: "~920 Models", icon: "🧪", sub: "GNNs, drug discovery & ADMET" },
+    { name: "Biology", count: "~2,150 Models", icon: "🧬", sub: "Microbiome, oncology & genomics" },
+    { name: "Earth & Climate", count: "~680 Models", icon: "🌍", sub: "Weather forecasting & altimetry" },
+    { name: "Materials Science", count: "~450 Models", icon: "💎", sub: "DFT bandgaps & crystal lattices" },
+  ];
+
+  const DOMAIN_TREE = {
+    "Physics": ["Fluid Dynamics", "Astrophysics", "PINNs", "Quantum Mechanics"],
+    "Chemistry": ["Molecular Modeling", "Drug Discovery", "Reaction Kinetics"],
+    "Biology": ["Genomics", "Oncology / Breast Cancer", "Gut Microbiome", "Neuroscience"],
+    "Earth & Climate": ["Atmospheric Modeling", "Oceanography", "Remote Sensing"],
+    "Materials Science": ["Materials Science", "Solid State DFT", "Perovskite Modeling"]
+  };
+
+  const getRelatedSearches = (query) => {
+    const q = (query || "").toLowerCase();
+    if (q.includes("microbiome") || q.includes("gut") || q.includes("asv") || q.includes("16s")) {
+      return [
+        "16S rRNA taxonomic profiling",
+        "Metagenomic sequence classification",
+        "Microbial community ViT",
+        "Short-chain fatty acid synthesis predictor",
+        "Antibiotic resistance gene finder"
+      ];
+    }
+    if (q.includes("physics") || q.includes("pinn") || q.includes("fluid")) {
+      return [
+        "Navier-Stokes turbulence surrogate",
+        "Hamiltonian neural networks",
+        "Fourier neural operator 2D/3D",
+        "Quantum chemistry VQE ansatz"
+      ];
+    }
+    return [
+      "Physics-informed loss penalties",
+      "Spatial transcriptomics autoencoder",
+      "Geophysical boundary condition ViT",
+      "Equivariant graph diffusion"
+    ];
+  };
+
+  function ModelFinderApp() {
+    const [currentPage, setCurrentPage] = useState(1);
+    const itemsPerPage = 10;
+    const [modelsList, setModelsList] = useState(SAMPLE_MODELS);
+    const [reviewsMap, setReviewsMap] = useState(() => {
+      const map = { ...INITIAL_REVIEWS_BY_MODEL };
+      SAMPLE_MODELS.forEach(m => {
+        if (!map[m.id]) {
+          map[m.id] = DEFAULT_SAMPLE_REVIEWS.slice(0, Math.min(m.review_count, DEFAULT_SAMPLE_REVIEWS.length));
+        }
+      });
+      return map;
+    });
+
+    const [currentView, setCurrentView] = useState('home');
+    const [searchQuery, setSearchQuery] = useState('');
+    const [query, setQuery] = useState('');
+    const [selectedSource, setSelectedSource] = useState('All Sources');
+    
+    const [selectedDomains, setSelectedDomains] = useState([]);
+    const [selectedSubDomains, setSelectedSubDomains] = useState([]);
+    const [selectedFrameworks, setSelectedFrameworks] = useState([]);
+    const [selectedVram, setSelectedVram] = useState([]);
+    const [selectedFreshness, setSelectedFreshness] = useState('All Time');
+    const [selectedHealthTiers, setSelectedHealthTiers] = useState([]);
+    const [sortBy, setSortBy] = useState('Relevance');
+    const [layoutMode, setLayoutMode] = useState('stack');
+    const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
+    
+    const [similarDrawerModel, setSimilarDrawerModel] = useState(null);
+    const [reviewModalModel, setReviewModalModel] = useState(null);
+
+    const [formRating, setFormRating] = useState(5);
+    const [formHoverRating, setFormHoverRating] = useState(0);
+    const [formComment, setFormComment] = useState('');
+    const [formUsername, setFormUsername] = useState('');
+    const [formUserRole, setFormUserRole] = useState('');
+    
+    const [toastMessage, setToastMessage] = useState(null);
+    const [expandedCards, setExpandedCards] = useState({});
+    const [isLoading, setIsLoading] = useState(false);
+
+    const [recentSearches, setRecentSearches] = useState(() => {
+      try {
+        const stored = localStorage.getItem('modelfinder_recent_searches');
+        return stored ? JSON.parse(stored) : [];
+      } catch (e) {
+        return [];
+      }
+    });
+
+    const addRecentSearch = (searchVal) => {
+      if (!searchVal || !searchVal.trim()) return;
+      const trimmed = searchVal.trim();
+      setRecentSearches(prev => {
+        const updated = [trimmed, ...prev.filter(item => item.toLowerCase() !== trimmed.toLowerCase())].slice(0, 5);
+        try {
+          localStorage.setItem('modelfinder_recent_searches', JSON.stringify(updated));
+        } catch (e) {}
+        return updated;
+      });
+    };
+
+    const clearAllRecentSearches = () => {
+      setRecentSearches([]);
+      try {
+        localStorage.removeItem('modelfinder_recent_searches');
+      } catch (e) {}
+      showToast("Search history cleared.");
+    };
+
+    const showToast = (msg) => {
+      setToastMessage(msg);
+      setTimeout(() => {
+        setToastMessage(null);
+      }, 4000);
+    };
+
+    const searchInputRef = useRef(null);
+    const stickySearchInputRef = useRef(null);
+
+    useEffect(() => {
+      const handleKeyDown = (e) => {
+        if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+          e.preventDefault();
+          if (currentView === 'home' && searchInputRef.current) {
+            searchInputRef.current.focus();
+          } else if (stickySearchInputRef.current) {
+            stickySearchInputRef.current.focus();
+          }
+        }
+        if (e.key === 'Escape') {
+          if (reviewModalModel) setReviewModalModel(null);
+          else if (similarDrawerModel) setSimilarDrawerModel(null);
+          else if (mobileFiltersOpen) setMobileFiltersOpen(false);
+        }
+      };
+      window.addEventListener('keydown', handleKeyDown);
+      return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [reviewModalModel, similarDrawerModel, mobileFiltersOpen, currentView]);
+
+    const executeSearch = async (qStr, domainOverride = null, resetFilters = false) => {
+      const trimmed = (qStr || '').trim();
+      setSearchQuery(trimmed);
+      setCurrentPage(1);
+      setMobileFiltersOpen(false);
+
+      if (resetFilters) {
+        setSelectedDomains([]);
+        setSelectedSubDomains([]);
+      }
+      if (trimmed) {
+        addRecentSearch(trimmed);
+      }
+
+      setCurrentView('results');
+      setIsLoading(true);
+      setModelsList([]);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+
+      try {
+        const targetQuery = trimmed || domainOverride || 'scientific machine learning';
+        const response = await fetch(`/api/search?q=${encodeURIComponent(targetQuery)}`);
+        if (!response.ok) throw new Error('Backend search failed');
+        const data = await response.json();
+
+        if (data && Array.isArray(data.models)) {
+          setModelsList(data.models);
+        } else {
+          setModelsList([]);
+        }
+      } catch (error) {
+        console.error("Search error:", error);
+        showToast("Live search unavailable. Showing fallback sample models.");
+        setModelsList(SAMPLE_MODELS);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    const resetAllFilters = () => {
+      setSelectedDomains([]);
+      setSelectedSubDomains([]);
+      setSelectedFrameworks([]);
+      setSelectedVram([]);
+      setSelectedHealthTiers([]);
+      setSelectedFreshness('All Time');
+      setSelectedSource('All Sources');
+      showToast("All filters have been reset.");
+    };
+
+    const toggleDomain = (domain) => {
+      if (selectedDomains.includes(domain)) {
+        setSelectedDomains(prev => prev.filter(d => d !== domain));
+        const subList = DOMAIN_TREE[domain] || [];
+        setSelectedSubDomains(prev => prev.filter(s => !subList.includes(s)));
+      } else {
+        setSelectedDomains(prev => [...prev, domain]);
+      }
+    };
+
+    const toggleFramework = (fw) => {
+      setSelectedFrameworks(prev => prev.includes(fw) ? prev.filter(f => f !== fw) : [...prev, fw]);
+    };
+
+    const toggleHealthTier = (tier) => {
+      setSelectedHealthTiers(prev => prev.includes(tier) ? prev.filter(t => t !== tier) : [...prev, tier]);
+    };
+
+    const activeFilterCount = useMemo(() => {
+      let count = 0;
+      if (selectedSource !== 'All Sources') count++;
+      count += selectedDomains.length;
+      count += selectedSubDomains.length;
+      count += selectedFrameworks.length;
+      count += selectedVram.length;
+      count += selectedHealthTiers.length;
+      if (selectedFreshness !== 'All Time') count++;
+      return count;
+    }, [selectedSource, selectedDomains, selectedSubDomains, selectedFrameworks, selectedVram, selectedHealthTiers, selectedFreshness]);
+
+    const filteredModels = useMemo(() => {
+      return modelsList.filter(item => {
+        if (selectedSource !== 'All Sources' && item.source !== selectedSource) return false;
+        if (selectedDomains.length > 0) {
+          if (!selectedDomains.includes(item.primary_domain)) return false;
+          if (selectedSubDomains.length > 0 && !selectedSubDomains.includes(item.sub_domain)) return false;
+        }
+        if (selectedFrameworks.length > 0 && !selectedFrameworks.includes(item.framework)) return false;
+        if (selectedVram.length > 0) {
+          const matchesVram = selectedVram.some(v => {
+            if (v === '<=8GB') return item.vram_gb <= 8;
+            if (v === '12GB') return item.vram_gb === 12;
+            if (v === '16GB') return item.vram_gb === 16;
+            if (v === '24GB+') return item.vram_gb >= 24;
+            return false;
+          });
+          if (!matchesVram) return false;
+        }
+        if (selectedHealthTiers.length > 0 && !selectedHealthTiers.includes(item.health_tier)) return false;
+        return true;
+      }).sort((a, b) => {
+        if (sortBy === 'Engagement') return b.sample_engagement_num - a.sample_engagement_num;
+        if (sortBy === 'Health Score') return b.health_score - a.health_score;
+        return 0;
+      });
+    }, [modelsList, selectedSource, selectedDomains, selectedSubDomains, selectedFrameworks, selectedVram, selectedHealthTiers, sortBy]);
+
+    const paginatedModels = useMemo(() => {
+      const startIndex = (currentPage - 1) * itemsPerPage;
+      return filteredModels.slice(startIndex, startIndex + itemsPerPage);
+    }, [filteredModels, currentPage]);
+
+    const totalPages = Math.ceil(filteredModels.length / itemsPerPage) || 1;
+
+    const similarRecommendations = useMemo(() => {
+      if (!similarDrawerModel) return [];
+      return modelsList
+        .filter(m => m.id !== similarDrawerModel.id)
+        .map(m => {
+          let score = 55;
+          const overlaps = [];
+          if (m.primary_domain === similarDrawerModel.primary_domain) {
+            score += 24;
+            overlaps.push(`Same Primary Domain (${m.primary_domain})`);
+          }
+          if (m.sub_domain === similarDrawerModel.sub_domain) {
+            score += 15;
+            overlaps.push(`Shared Sub-domain: ${m.sub_domain}`);
+          }
+          if (m.framework === similarDrawerModel.framework) {
+            score += 6;
+            overlaps.push(`Matching Framework: ${m.framework}`);
+          }
+          return {
+            model: m,
+            matchScore: Math.min(98, score),
+            overlaps: overlaps.slice(0, 3)
+          };
+        })
+        .sort((a, b) => b.matchScore - a.matchScore)
+        .slice(0, 3);
+    }, [similarDrawerModel, modelsList]);
+
+    const openReviewModal = async (model) => {
+      setReviewModalModel(model);
+      try {
+        const response = await fetch(`/api/reviews/${encodeURIComponent(model.id)}`);
+        if (response.ok) {
+          const data = await response.json();
+          setReviewsMap(prev => ({
+            ...prev,
+            [model.id]: data.reviews
+          }));
+        }
+      } catch (err) {
+        console.error("Failed to load reviews from server:", err);
+      }
+    };
+    
+    const handleReviewSubmit = async (e) => {
+      e.preventDefault();
+      if (!reviewModalModel) return;
+      if (!formComment.trim()) {
+        showToast("Please enter a short comment about your experience.");
+        return;
+      }
+
+      const targetId = reviewModalModel.id;
+      const payload = {
+        username: formUsername.trim() || 'Verified Researcher',
+        user_role: formUserRole.trim() || 'AI Research Scientist',
+        rating: formRating,
+        comment: formComment.trim()
+      };
+
+      try {
+        const response = await fetch(`/api/reviews/${encodeURIComponent(targetId)}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) throw new Error("Failed to post review");
+        const savedReview = await response.json();
+
+        setReviewsMap(prev => ({
+          ...prev,
+          [targetId]: [savedReview, ...(prev[targetId] || [])]
+        }));
+
+        setModelsList(prev => prev.map(m => m.id === targetId ? { ...m, review_count: (m.review_count || 0) + 1 } : m));
+        setReviewModalModel(prev => ({ ...prev, review_count: (prev.review_count || 0) + 1 }));
+
+        setFormComment('');
+        setFormUsername('');
+        setFormUserRole('');
+        setFormRating(5);
+        showToast(`Review saved permanently for ${reviewModalModel.model_name}!`);
+      } catch (err) {
+        console.error("Error submitting review:", err);
+        showToast("Error saving review to backend.");
+      }
+    };
+
+    const handleHelpfulVote = async (reviewId) => {
+      if (!reviewModalModel) return;
+      const targetId = reviewModalModel.id;
+
+      try {
+        await fetch(`/api/reviews/${encodeURIComponent(reviewId)}/helpful`, {
+          method: 'POST'
+        });
+
+        setReviewsMap(prev => {
+          const list = prev[targetId] || [];
+          return {
+            ...prev,
+            [targetId]: list.map(r => r.id === reviewId ? { ...r, helpfulCount: (r.helpfulCount || 0) + 1 } : r)
+          };
+        });
+        showToast("Marked review as helpful!");
+      } catch (err) {
+        console.error("Error recording helpful vote:", err);
+      }
+    };
+
+    return (
+      <div className="min-h-screen flex flex-col bg-[#0B0F19] text-slate-100">
+        
+        {/* Toast */}
+        {toastMessage && (
+          <div className="fixed bottom-4 right-4 left-4 sm:left-auto z-50 max-w-md bg-slate-900 border border-cyan-500/40 text-slate-100 p-4 rounded-xl shadow-2xl flex items-center justify-between space-x-3">
+            <div className="flex items-center space-x-2.5">
+              <span className="text-cyan-400">ℹ️</span>
+              <span className="text-xs sm:text-sm text-slate-200">{toastMessage}</span>
+            </div>
+            <button onClick={() => setToastMessage(null)} className="text-slate-400 hover:text-white ml-2">✕</button>
+          </div>
+        )}
+
+        {/* Global Navigation Header */}
+        <header className="sticky top-0 z-30 bg-[#0B0F19]/95 backdrop-blur-md border-b border-white/10 px-3 sm:px-8 py-3 flex items-center justify-between gap-2">
+          <div className="flex items-center space-x-2 min-w-0">
+            <button
+              onClick={() => {
+                setCurrentView('home');
+                setQuery('');
+                setSearchQuery('');
+              }}
+              className="flex items-center space-x-2 text-left group min-w-0"
+            >
+              <div className="w-8 h-8 sm:w-9 sm:h-9 shrink-0 rounded-xl bg-gradient-to-tr from-cyan-600 to-violet-600 flex items-center justify-center font-bold text-white text-sm sm:text-base">
+                ⚛️
+              </div>
+              <div className="flex items-center space-x-2 min-w-0">
+                <span className="font-bold text-base sm:text-lg text-white group-hover:text-cyan-300 transition-colors truncate">
+                  ModelFinder
+                </span>
+                <span className="hidden lg:inline-block text-[10px] font-mono px-2 py-0.5 rounded-full bg-cyan-950/80 border border-cyan-500/30 text-cyan-300 font-medium whitespace-nowrap">
+                  Scientific Model Index
+                </span>
+              </div>
+            </button>
+          </div>
+
+          {currentView === 'results' && (
+            <div className="hidden md:flex flex-1 max-w-xl mx-4">
+              <form 
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  executeSearch(query);
+                }}
+                className="relative w-full flex items-center"
+              >
+                <span className="absolute left-3.5 text-slate-400 text-sm">🔍</span>
+                <input
+                  ref={stickySearchInputRef}
+                  type="text"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Search scientific models, weights, PDEs, GNNs..."
+                  className="w-full bg-slate-900 border border-white/10 focus:border-cyan-400 focus:ring-0 rounded-xl pl-10 pr-20 py-2 text-sm text-slate-100 outline-none"
+                />
+                <button
+                  type="submit"
+                  className="absolute right-1.5 px-2.5 py-1 bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 rounded-lg text-xs font-medium border border-cyan-500/40 cursor-pointer"
+                >
+                  Search
+                </button>
+              </form>
+            </div>
+          )}
+
+          <div className="flex items-center space-x-1.5 sm:space-x-2.5 text-xs sm:text-sm text-slate-300 shrink-0">
+            <button
+              onClick={() => showToast("ModelFinder indexes open-weight models across Biology, Physics, Chemistry, Earth Science & Materials from Hugging Face & GitHub.")}
+              className="hidden md:inline-flex px-3 py-1.5 rounded-lg bg-slate-900 border border-white/10 hover:border-slate-600 text-slate-300 transition-colors whitespace-nowrap"
+            >
+              About ModelFinder
+            </button>
+            <button
+              onClick={() => showToast("All API endpoints operational. Turso Cloud DB & Antigravity AI active.")}
+              className="px-2 sm:px-2.5 py-1.5 rounded-lg bg-slate-900 border border-white/10 hover:border-cyan-500/40 text-slate-400 hover:text-cyan-300 font-mono text-[11px] sm:text-xs transition-colors whitespace-nowrap"
+            >
+              Status
+            </button>
+            <a
+              href="https://github.com/jafudar342/model-finder-v1"
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="GitHub Repository"
+              className="p-2 sm:p-2.5 rounded-xl border border-slate-700/80 bg-slate-900/60 text-slate-300 hover:text-white hover:border-slate-600 transition-colors flex items-center justify-center"
+              title="GitHub Repository"
+            >
+              <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24" aria-hidden="true">
+                <path fillRule="evenodd" clipRule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z" />
+              </svg>
+            </a>
+            <button
+              onClick={() => showToast("Currently in high-contrast Scientific Dark Mode (optimized for laboratory displays).")}
+              title="Toggle Theme"
+              className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-slate-900 border border-white/10 hover:border-slate-600 flex items-center justify-center text-slate-400 hover:text-amber-300 transition-colors"
+            >
+              🌙
+            </button>
+          </div>
+        </header>
+
+        {/* VIEW 1: HOMEPAGE */}
+        {currentView === 'home' && (
+          <main className="flex-1 flex flex-col items-center px-4 sm:px-6 py-8 sm:py-16 max-w-5xl mx-auto w-full">
+            <div className="text-center space-y-3 mb-6 sm:mb-8">
+              <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-cyan-950/60 border border-cyan-500/20 text-cyan-300 text-[11px] sm:text-xs font-mono font-medium">
+                <span>Open Weights &amp; Repositories Across Broad Sciences</span>
+              </div>
+              <h1 className="text-3xl sm:text-5xl font-extrabold tracking-tight text-white max-w-2xl mx-auto leading-tight">
+                Discover scientific AI models across disciplines
+              </h1>
+              <p className="text-slate-400 text-xs sm:text-base max-w-xl mx-auto px-2">
+                Find physics-informed architectures, molecular GNNs, genomic transformers, and climate emulators from Hugging Face and GitHub.
+              </p>
+            </div>
+
+            {/* Source Pill */}
+            <div className="mb-4 inline-flex items-center bg-slate-900/90 border border-white/10 rounded-xl p-1 text-xs sm:text-sm max-w-full overflow-x-auto">
+              <button
+                onClick={() => setSelectedSource('All Sources')}
+                className={`px-2.5 sm:px-3 py-1.5 rounded-lg font-medium transition-all flex items-center space-x-1.5 whitespace-nowrap ${
+                  selectedSource === 'All Sources' ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <span>🌐</span>
+                <span>All Sources</span>
+              </button>
+              <button
+                onClick={() => setSelectedSource('Hugging Face')}
+                className={`px-2.5 sm:px-3 py-1.5 rounded-lg font-medium transition-all flex items-center space-x-1.5 whitespace-nowrap ${
+                  selectedSource === 'Hugging Face' ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <span>🤗</span>
+                <span>Hugging Face</span>
+              </button>
+              <button
+                onClick={() => setSelectedSource('GitHub')}
+                className={`px-2.5 sm:px-3 py-1.5 rounded-lg font-medium transition-all flex items-center space-x-1.5 whitespace-nowrap ${
+                  selectedSource === 'GitHub' ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <svg className="w-3.5 h-3.5 fill-current inline-block shrink-0" viewBox="0 0 24 24" aria-hidden="true">
+                  <path fillRule="evenodd" clipRule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z" />
+                </svg>
+                <span>GitHub</span>
+              </button>
+            </div>
+
+            {/* Search Bar */}
+            <div className="w-full max-w-3xl mb-8">
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  executeSearch(query);
+                }}
+                className="flex items-center h-14 sm:h-16 w-full bg-slate-900/90 border border-white/15 focus-within:border-cyan-400 rounded-2xl px-3.5 sm:px-5 gap-2"
+              >
+                <span className="text-slate-400 text-lg sm:text-xl shrink-0">🔍</span>
+                <input
+                  ref={searchInputRef}
+                  type="text"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Search scientific models (e.g. 'PINN', 'Microbiome')..."
+                  className="w-full min-w-0 bg-transparent border-0 focus:ring-0 p-0 text-sm sm:text-lg text-slate-100 placeholder-slate-500 outline-none"
+                />
+                <button
+                  type="submit"
+                  className="shrink-0 px-4 sm:px-5 py-2 sm:py-2.5 bg-gradient-to-r from-cyan-600 to-cyan-500 hover:from-cyan-500 text-slate-950 font-semibold rounded-xl text-xs sm:text-sm transition-all cursor-pointer"
+                >
+                  Search
+                </button>
+              </form>
+            </div>
+
+            {/* Popular Searches */}
+            <div className="w-full max-w-3xl space-y-3 mb-6 bg-slate-900/40 p-4 sm:p-5 rounded-2xl border border-white/5">
+              <div className="flex items-center justify-between">
+                <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-400">🔥 Popular Searches</h2>
+                <span className="text-[11px] text-slate-500">Click chip to search</span>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {POPULAR_SEARCHES.map(chip => (
+                  <button
+                    key={chip}
+                    onClick={() => {
+                      setQuery(chip);
+                      executeSearch(chip, null, true);
+                    }}
+                    className="px-3 py-1.5 rounded-xl bg-slate-900 border border-white/10 hover:border-cyan-400/50 text-xs text-slate-300 font-mono transition-colors text-left"
+                  >
+                    #{chip}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Recent Searches */}
+            <div className="w-full max-w-3xl space-y-3 mb-10 bg-slate-900/40 p-4 sm:p-5 rounded-2xl border border-white/5">
+              <div className="flex items-center justify-between">
+                <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-400">🕒 Recent Searches</h2>
+                {recentSearches.length > 0 && (
+                  <button onClick={clearAllRecentSearches} className="text-[11px] text-slate-500 hover:text-rose-400">
+                    Clear History
+                  </button>
+                )}
+              </div>
+              {recentSearches.length > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                  {recentSearches.map(q => (
+                    <div
+                      key={q}
+                      onClick={() => {
+                        setQuery(q);
+                        executeSearch(q);
+                      }}
+                      className="cursor-pointer px-3 py-1.5 rounded-xl bg-slate-900 border border-white/10 hover:border-slate-500 text-xs text-slate-300 flex items-center space-x-2"
+                    >
+                      <span>⏱ {q}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-slate-500 italic py-1">Your search history will appear here.</p>
+              )}
+            </div>
+
+            {/* Broad Domains */}
+            <div className="w-full max-w-4xl space-y-4">
+              <div className="text-center sm:text-left">
+                <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-400">Broad Scientific Disciplines</h3>
+                <p className="text-xs text-slate-500">Direct shortcuts to domain-specific model catalogs</p>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+                {DOMAIN_SHORTCUTS.map(item => (
+                  <button
+                    key={item.name}
+                    onClick={() => {
+                      setSelectedDomains([item.name]);
+                      setSelectedSubDomains([]);
+                      setQuery(item.name);
+                      executeSearch(item.name, item.name, false);
+                    }}
+                    className="bg-slate-900/80 border border-white/10 hover:border-cyan-500/50 p-4 rounded-2xl text-left transition-all"
+                  >
+                    <div className="text-2xl mb-2">{item.icon}</div>
+                    <div className="font-semibold text-sm text-slate-200">{item.name}</div>
+                    <div className="text-[11px] text-slate-400 mt-1 line-clamp-2">{item.sub}</div>
+                    <div className="mt-3 pt-2 border-t border-white/5 text-[10px] font-mono text-cyan-400/80">{item.count}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </main>
+        )}
+
+        {/* VIEW 2: SEARCH RESULTS */}
+        {currentView === 'results' && (
+          <div className="flex-1 flex flex-col px-4 sm:px-8 py-5 max-w-7xl mx-auto w-full">
+            
+            {/* Mobile Search Bar on Results Page */}
+            <div className="md:hidden mb-4">
+              <form 
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  executeSearch(query);
+                }}
+                className="relative w-full flex items-center bg-slate-900 border border-white/15 focus-within:border-cyan-400 rounded-xl px-3 py-1.5"
+              >
+                <span className="text-slate-400 text-sm mr-2">🔍</span>
+                <input
+                  type="text"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Search scientific models..."
+                  className="w-full min-w-0 bg-transparent border-0 focus:ring-0 p-1 text-sm text-slate-100 outline-none"
+                />
+                <button
+                  type="submit"
+                  className="ml-2 px-3 py-1.5 bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 rounded-lg text-xs font-medium border border-cyan-500/40 shrink-0"
+                >
+                  Search
+                </button>
+              </form>
+            </div>
+
+            <div className="flex items-center justify-between mb-4 gap-2">
+              <button
+                onClick={() => setCurrentView('home')}
+                className="text-xs text-slate-400 hover:text-cyan-300 transition-colors"
+              >
+                ← Back to Home
+              </button>
+
+              <div className="flex items-center space-x-2">
+                {/* Mobile Filter Toggle Button */}
+                <button
+                  onClick={() => setMobileFiltersOpen(prev => !prev)}
+                  className="md:hidden px-3 py-1.5 rounded-xl bg-slate-900 border border-cyan-500/40 text-cyan-300 text-xs font-medium flex items-center space-x-1.5"
+                >
+                  <span>⚙️ Filters</span>
+                  {activeFilterCount > 0 && (
+                    <span className="px-1.5 py-0.2 rounded-full bg-cyan-500 text-slate-950 font-bold text-[10px]">
+                      {activeFilterCount}
+                    </span>
+                  )}
+                  <span>{mobileFiltersOpen ? '▲' : '▼'}</span>
+                </button>
+
+                <div className="hidden sm:block bg-slate-900 border border-white/10 rounded-xl p-0.5 text-xs">
+                  <button
+                    onClick={() => setLayoutMode('stack')}
+                    className={`px-2.5 py-1 rounded-lg ${layoutMode === 'stack' ? 'bg-cyan-500/20 text-cyan-300 font-medium' : 'text-slate-400'}`}
+                  >
+                    ☰ Stack
+                  </button>
+                  <button
+                    onClick={() => setLayoutMode('grid')}
+                    className={`px-2.5 py-1 rounded-lg ${layoutMode === 'grid' ? 'bg-cyan-500/20 text-cyan-300 font-medium' : 'text-slate-400'}`}
+                  >
+                    ☵ Grid
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Active Filters */}
+            {activeFilterCount > 0 && (
+              <div className="bg-slate-900/60 border border-white/10 rounded-2xl p-3 mb-5 flex flex-wrap items-center gap-2">
+                <span className="text-xs font-semibold text-slate-400 mr-1">Active Filters:</span>
+                {selectedSource !== 'All Sources' && (
+                  <span className="px-2.5 py-1 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs">
+                    Source: {selectedSource}
+                    <button onClick={() => setSelectedSource('All Sources')} className="ml-1.5 hover:text-white">✕</button>
+                  </span>
+                )}
+                {selectedDomains.map(d => (
+                  <span key={d} className="px-2.5 py-1 rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 text-xs">
+                    {d}
+                    <button onClick={() => toggleDomain(d)} className="ml-1.5 hover:text-white">✕</button>
+                  </span>
+                ))}
+                {selectedHealthTiers.map(tier => (
+                  <span key={tier} className="px-2.5 py-1 rounded-lg border text-xs font-mono bg-emerald-950/20 text-emerald-400 border-emerald-500/30">
+                    Health: {tier}
+                    <button onClick={() => toggleHealthTier(tier)} className="ml-1.5 hover:text-white">✕</button>
+                  </span>
+                ))}
+                <button onClick={resetAllFilters} className="text-xs text-rose-400 hover:text-rose-300 underline font-medium ml-2">
+                  Reset All
+                </button>
+              </div>
+            )}
+
+            {/* Main Content Layout */}
+            <div className="flex flex-col md:flex-row gap-6 items-start">
+              
+              {/* Sidebar: Collapsible on Mobile, Sticky ONLY on Desktop (md:sticky) */}
+              <aside className={`${mobileFiltersOpen ? 'block' : 'hidden'} md:block w-full md:w-72 shrink-0 bg-slate-900 border border-white/10 rounded-2xl p-5 space-y-6 md:sticky md:top-24 md:max-h-[82vh] md:overflow-y-auto`}>
+                <div className="flex items-center justify-between pb-3 border-b border-white/10">
+                  <h3 className="font-bold text-sm uppercase text-slate-200">Faceted Filters</h3>
+                  <div className="flex items-center space-x-3">
+                    {activeFilterCount > 0 && (
+                      <button onClick={resetAllFilters} className="text-xs text-rose-400 hover:text-rose-300">Reset</button>
+                    )}
+                    <button onClick={() => setMobileFiltersOpen(false)} className="md:hidden text-xs text-slate-400 hover:text-white">
+                      Close ✕
+                    </button>
+                  </div>
+                </div>
+
+                {/* Source */}
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold text-slate-400 uppercase">Repository Source</label>
+                  <div className="space-y-1.5">
+                    {[
+                      { name: 'All Sources', icon: '🌐' },
+                      { name: 'Hugging Face', icon: '🤗' },
+                      { name: 'GitHub', icon: '🐙' }
+                    ].map(({ name, icon }) => (
+                      <label key={name} className="flex items-center space-x-2 text-xs text-slate-300 cursor-pointer">
+                        <input
+                          type="radio"
+                          name="sourceRadio"
+                          checked={selectedSource === name}
+                          onChange={() => setSelectedSource(name)}
+                          className="text-cyan-500 bg-slate-800"
+                        />
+                        <span className="flex items-center space-x-1.5">
+                          <span>{icon}</span>
+                          <span>{name}</span>
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Health Tier */}
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold text-slate-400 uppercase">Model Health Rating</label>
+                  <div className="space-y-1.5">
+                    {['A+', 'A', 'B', 'C'].map(tier => {
+                      const cfg = getHealthConfig(tier, 90);
+                      return (
+                        <label key={tier} className="flex items-center space-x-2 text-xs text-slate-300 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={selectedHealthTiers.includes(tier)}
+                            onChange={() => toggleHealthTier(tier)}
+                            className="rounded text-cyan-500 bg-slate-800"
+                          />
+                          <span className="font-mono">{tier} ({cfg.label})</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Domains */}
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold text-slate-400 uppercase">Scientific Domains</label>
+                  <div className="space-y-1.5">
+                    {Object.keys(DOMAIN_TREE).map(domain => (
+                      <label key={domain} className="flex items-center space-x-2 text-xs text-slate-300 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={selectedDomains.includes(domain)}
+                          onChange={() => toggleDomain(domain)}
+                          className="rounded text-cyan-500 bg-slate-800"
+                        />
+                        <span>{domain}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                {/* ML Framework */}
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold text-slate-400 uppercase">Framework</label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {['PyTorch', 'JAX', 'TensorFlow', 'ONNX'].map(fw => (
+                      <button
+                        key={fw}
+                        onClick={() => toggleFramework(fw)}
+                        className={`px-2 py-1 rounded-lg text-xs font-mono border ${
+                          selectedFrameworks.includes(fw) ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/50' : 'bg-slate-900 border-white/10 text-slate-400'
+                        }`}
+                      >
+                        {fw}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </aside>
+
+              {/* Feed */}
+              <main className="flex-1 w-full min-w-0 space-y-5">
+                <div className="flex items-center justify-between gap-2 bg-slate-900/60 p-3.5 sm:p-4 rounded-2xl border border-white/10">
+                  <h2 className="text-sm sm:text-base font-bold text-slate-100">
+                    {isLoading ? (
+                      <span className="text-cyan-400 font-mono text-xs sm:text-sm">Searching repositories...</span>
+                    ) : (
+                      <>Showing <span className="text-cyan-400">{filteredModels.length}</span> models</>
+                    )}
+                  </h2>
+                  <select
+                    value={sortBy}
+                    onChange={(e) => setSortBy(e.target.value)}
+                    className="bg-slate-800 border border-white/15 text-slate-200 text-xs rounded-xl px-2.5 sm:px-3 py-1.5"
+                  >
+                    <option value="Relevance">Relevance</option>
+                    <option value="Health Score">Model Health Rating</option>
+                    <option value="Engagement">Engagement</option>
+                  </select>
+                </div>
+
+                {/* Conditional Searching Banner vs Cards List */}
+                {isLoading ? (
+                  <div className="searching-banner">
+                    <div className="searching-spinner"></div>
+                    <h3 className="text-base sm:text-lg font-bold text-white mb-1.5">
+                      Searching for "{searchQuery || 'scientific models'}"...
+                    </h3>
+                    <p className="text-xs sm:text-sm text-slate-400 font-mono max-w-md">
+                      Indexing Hugging Face &amp; analyzing GitHub repositories with Antigravity AI...
+                    </p>
+                  </div>
+                ) : paginatedModels.length === 0 ? (
+                  <div className="searching-banner">
+                    <h3 className="text-base font-bold text-slate-200 mb-1">
+                      No models matched your current filters
+                    </h3>
+                    <p className="text-xs text-slate-400 mb-3">
+                      Try clearing active sidebar filters or searching for another keyword.
+                    </p>
+                    {activeFilterCount > 0 && (
+                      <button
+                        onClick={resetAllFilters}
+                        className="px-3.5 py-1.5 bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 rounded-xl text-xs font-medium border border-cyan-500/40"
+                      >
+                        Reset All Filters
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <div className={layoutMode === 'grid' ? "grid grid-cols-1 lg:grid-cols-2 gap-4" : "space-y-4"}>
+                    {paginatedModels.map(model => (
+                      <article
+                        key={model.id}
+                        className="bg-slate-900/90 border border-white/10 hover:border-cyan-500/40 rounded-2xl p-4 sm:p-6 space-y-4 group overflow-hidden"
+                      >
+                        {/* Top Header */}
+                        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
+                          <div className="space-y-1.5 min-w-0">
+                            <h3 className="text-base sm:text-lg font-bold text-white group-hover:text-cyan-300 transition-colors break-words">
+                              {model.model_name}
+                            </h3>
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="text-xs px-2.5 py-0.5 rounded-full border border-cyan-500/40 text-cyan-300 bg-cyan-950/30">
+                                {model.primary_domain}
+                              </span>
+                              <span className="text-xs px-2.5 py-0.5 rounded-full bg-violet-950/80 text-violet-300 border border-violet-500/30">
+                                {model.sub_domain}
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Badges: Source + Health Badge */}
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-xs font-mono px-2.5 py-1 rounded-xl bg-slate-800 border border-white/10 text-slate-300">
+                              {model.source === 'Hugging Face' ? '🤗 HF' : 'GitHub'} • {model.sample_stats}
+                            </span>
+                            <ModelHealthBadge tier={model.health_tier} score={model.health_score} />
+                          </div>
+                        </div>
+
+                        {/* Description */}
+                        <p className={`text-xs sm:text-sm text-slate-300 leading-relaxed break-words ${expandedCards[model.id] ? '' : 'line-clamp-2'}`}>
+                          {model.description}
+                        </p>
+
+                        <button
+                          onClick={() => setExpandedCards(prev => ({ ...prev, [model.id]: !prev[model.id] }))}
+                          className="text-cyan-400 hover:text-cyan-300 text-xs font-mono underline"
+                        >
+                          {expandedCards[model.id] ? "Show less" : "Read full spec"}
+                        </button>
+
+                        {/* Specs */}
+                        <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-white/5 text-xs font-mono text-slate-400">
+                          <span className="px-2 py-0.5 rounded bg-slate-800 border border-white/10">⚙ {model.framework}</span>
+                          <span className="px-2 py-0.5 rounded bg-slate-800 border border-white/10">⚡ {model.hardware_req}</span>
+                          <span className="px-2 py-0.5 rounded bg-slate-800 border border-white/10">🕒 {model.last_updated}</span>
+                        </div>
+
+                        {/* Action Buttons Bar */}
+                        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 pt-3 border-t border-white/5">
+                          <div className="flex items-center space-x-2">
+                            <button
+                              onClick={() => {
+                                let targetUrl = model.repo_url || `https://github.com`;
+                                if (!model.repo_url && model.source === 'Hugging Face') {
+                                  const cleanId = model.id.replace('hf-', '').replace('-', '/');
+                                  targetUrl = `https://huggingface.co/${cleanId}`;
+                                }
+                                window.open(targetUrl, '_blank');
+                              }}
+                              className="flex-1 sm:flex-initial justify-center px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-medium border border-white/15 cursor-pointer flex items-center"
+                            >
+                              View Source ↗
+                            </button>
+
+                            <button
+                              onClick={() => openReviewModal(model)}
+                              className="flex-1 sm:flex-initial justify-center px-3 py-1.5 bg-slate-800/80 hover:bg-slate-700/90 text-slate-300 hover:text-cyan-200 rounded-xl text-xs font-medium border border-slate-700 hover:border-cyan-500/40 transition-colors flex items-center space-x-1.5"
+                              title={`Open Community Reviews & Feedback for ${model.model_name}`}
+                            >
+                              <span className="text-cyan-400">💬</span>
+                              <span>Reviews</span>
+                              <span className="text-[11px] font-mono px-1.5 py-0.5 rounded-md bg-slate-900 border border-white/10 text-cyan-300">
+                                {model.review_count || 0}
+                              </span>
+                            </button>
+                          </div>
+
+                          <button
+                            onClick={() => setSimilarDrawerModel(model)}
+                            className="px-3.5 py-1.5 bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 font-semibold rounded-xl text-xs border border-cyan-500/40 text-center"
+                          >
+                            ⚡ Find Similar Models
+                          </button>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                )}
+
+                {/* Related searches & Pagination */}
+                <div className="mt-8 pt-6 border-t border-white/10 bg-slate-900/40 p-4 sm:p-5 rounded-2xl space-y-3">
+                  {!isLoading && totalPages > 1 && (
+                    <div className="flex items-center justify-between bg-slate-900/60 p-3.5 sm:p-4 rounded-2xl border border-white/10 mb-4">
+                      <button
+                        onClick={() => { setCurrentPage(p => Math.max(p - 1, 1)); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+                        disabled={currentPage === 1}
+                        className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-200 rounded-xl text-xs font-medium border border-white/15 cursor-pointer"
+                      >
+                        ← Previous
+                      </button>
+                      <span className="text-xs font-mono text-slate-300">
+                        Page <strong className="text-cyan-400">{currentPage}</strong> of {totalPages}
+                      </span>
+                      <button
+                        onClick={() => { setCurrentPage(p => Math.min(p + 1, totalPages)); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+                        disabled={currentPage === totalPages}
+                        className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-200 rounded-xl text-xs font-medium border border-white/15 cursor-pointer"
+                      >
+                        Next →
+                      </button>
+                    </div>
+                  )}
+                  <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-300">Searches related to your query</h3>
+                  <div className="flex flex-wrap gap-2">
+                    {getRelatedSearches(searchQuery).map(rel => (
+                      <button
+                        key={rel}
+                        onClick={() => {
+                          setQuery(rel);
+                          executeSearch(rel);
+                        }}
+                        className="px-3 py-1.5 rounded-xl bg-slate-900 border border-white/10 hover:border-cyan-400/50 text-xs text-slate-300 hover:text-cyan-300 text-left"
+                      >
+                        🔎 {rel}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </main>
+            </div>
+          </div>
+        )}
+
+        {/* COMMUNITY REVIEWS & FEEDBACK MODAL DIALOG */}
+        {reviewModalModel && (
+          <div className="fixed inset-0 z-50 overflow-y-auto flex items-center justify-center p-3 sm:p-6">
+            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm transition-opacity" onClick={() => setReviewModalModel(null)} />
+            
+            <div className="relative w-full max-w-2xl bg-[#0E1424] border border-white/15 rounded-2xl shadow-2xl overflow-hidden z-10 flex flex-col max-h-[90vh]">
+              
+              {/* Modal Header */}
+              <div className="p-4 sm:p-6 border-b border-white/10 bg-slate-900/80">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="space-y-1 min-w-0">
+                    <div className="flex items-center space-x-2">
+                      <span className="text-xl text-cyan-400">💬</span>
+                      <h2 className="text-base sm:text-xl font-bold text-white truncate">
+                        Community Reviews &amp; Feedback
+                      </h2>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 pt-1 text-xs">
+                      <span className="font-semibold text-slate-200 break-all">
+                        Target Model: {reviewModalModel.model_name}
+                      </span>
+                      <span className="text-slate-600">•</span>
+                      <span className="px-2 py-0.5 rounded-full bg-cyan-950/80 text-cyan-300 border border-cyan-500/30 text-[11px]">
+                        {reviewModalModel.primary_domain}
+                      </span>
+                      <span className="text-slate-600">•</span>
+                      <span className="text-slate-400 font-mono text-[11px]">
+                        {reviewModalModel.review_count || 0} Reviews
+                      </span>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={() => setReviewModalModel(null)}
+                    className="w-8 h-8 shrink-0 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center text-sm transition-colors"
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
+
+              {/* Modal Body */}
+              <div className="p-4 sm:p-6 space-y-6 overflow-y-auto flex-1">
+                
+                {/* 1. "Leave a Review" Form */}
+                <section className="bg-slate-900/60 border border-slate-800 rounded-xl p-4 sm:p-5 space-y-4">
+                  <div className="flex items-center justify-between border-b border-white/5 pb-2">
+                    <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-300 flex items-center space-x-1.5">
+                      <span>✍️</span>
+                      <span>Leave a Review</span>
+                    </h3>
+                    <span className="text-[11px] text-cyan-400 font-mono">
+                      Verification Notes
+                    </span>
+                  </div>
+
+                  <form onSubmit={handleReviewSubmit} className="space-y-3.5">
+                    <div>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className="text-xs text-slate-300 font-medium">Rating:</label>
+                        <span className="text-xs font-mono text-amber-300">
+                          {formHoverRating || formRating} / 5 Stars
+                        </span>
+                      </div>
+                      <div className="flex items-center space-x-1">
+                        {[1, 2, 3, 4, 5].map(star => {
+                          const isFilled = star <= (formHoverRating || formRating);
+                          return (
+                            <button
+                              key={star}
+                              type="button"
+                              onClick={() => setFormRating(star)}
+                              onMouseEnter={() => setFormHoverRating(star)}
+                              onMouseLeave={() => setFormHoverRating(0)}
+                              className={`text-2xl transition-transform hover:scale-125 focus:outline-none cursor-pointer ${
+                                isFilled ? 'text-amber-400' : 'text-slate-600'
+                              }`}
+                              title={`Rate ${star} star${star > 1 ? 's' : ''}`}
+                            >
+                              ★
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="text-xs text-slate-300 font-medium block mb-1">
+                        Your Experience Running This Model
+                      </label>
+                      <textarea
+                        rows={3}
+                        value={formComment}
+                        onChange={(e) => setFormComment(e.target.value)}
+                        placeholder="Share your experience running this model (weights verification, inference setup, dataset compatibility)..."
+                        className="w-full bg-slate-950/80 border border-slate-800 focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400 rounded-xl p-3 text-xs sm:text-sm text-slate-100 placeholder-slate-500 outline-none"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-[11px] text-slate-400 block mb-1">Reviewer Name (Optional)</label>
+                        <input
+                          type="text"
+                          value={formUsername}
+                          onChange={(e) => setFormUsername(e.target.value)}
+                          placeholder="e.g. Dr. Alan T."
+                          className="w-full bg-slate-950/80 border border-slate-800 focus:border-cyan-400 rounded-xl px-3 py-1.5 text-xs text-slate-100 placeholder-slate-600 outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] text-slate-400 block mb-1">Role / Lab Affiliation (Optional)</label>
+                        <input
+                          type="text"
+                          value={formUserRole}
+                          onChange={(e) => setFormUserRole(e.target.value)}
+                          placeholder="e.g. Metagenomics Core Postdoc"
+                          className="w-full bg-slate-950/80 border border-slate-800 focus:border-cyan-400 rounded-xl px-3 py-1.5 text-xs text-slate-100 placeholder-slate-600 outline-none"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex justify-end pt-1">
+                      <button
+                        type="submit"
+                        className="px-4 py-2 bg-gradient-to-r from-cyan-600 to-cyan-500 hover:from-cyan-500 text-slate-950 font-semibold rounded-xl text-xs transition-all shadow-md shadow-cyan-950/40"
+                      >
+                        Submit Review ✓
+                      </button>
+                    </div>
+                  </form>
+                </section>
+
+                {/* 2. "Recent Reviews" Feed */}
+                <section className="space-y-3.5">
+                  <div className="flex items-center justify-between border-b border-white/10 pb-2">
+                    <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-300 flex items-center space-x-2">
+                      <span>Recent Reviews</span>
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-slate-800 font-mono text-cyan-300">
+                        {(reviewsMap[reviewModalModel.id] || []).length} Verified Notes
+                      </span>
+                    </h3>
+                  </div>
+
+                  <div className="space-y-3">
+                    {(reviewsMap[reviewModalModel.id] || []).length === 0 ? (
+                      <p className="text-xs text-slate-500 italic py-2">No reviews yet for this model. Be the first to share your benchmark notes!</p>
+                    ) : (
+                      (reviewsMap[reviewModalModel.id] || []).map(rev => (
+                        <div
+                          key={rev.id}
+                          className="bg-slate-900/90 border border-white/5 rounded-xl p-4 space-y-2.5"
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex items-center space-x-2.5">
+                              <div className="w-8 h-8 shrink-0 rounded-full bg-gradient-to-tr from-cyan-700 to-violet-700 flex items-center justify-center text-xs font-bold text-white">
+                                {(rev.username || 'U')[0]}
+                              </div>
+                              <div>
+                                <div className="text-xs font-semibold text-slate-200">{rev.username}</div>
+                                <div className="text-[10px] text-slate-400 font-mono">{rev.userRole}</div>
+                              </div>
+                            </div>
+                            <div className="flex flex-col items-end space-y-0.5">
+                              <StarRatingDisplay rating={rev.rating} />
+                              <span className="text-[10px] text-slate-500 font-mono">{rev.date}</span>
+                            </div>
+                          </div>
+
+                          <p className="text-xs text-slate-300 leading-relaxed sm:pl-10">
+                            {rev.comment}
+                          </p>
+
+                          <div className="flex items-center justify-between pt-2 border-t border-white/5 text-[11px] sm:pl-10">
+                            <span className="text-slate-500 font-mono text-[10px]">Verified Community Note</span>
+                            <button
+                              type="button"
+                              onClick={() => handleHelpfulVote(rev.id)}
+                              className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-cyan-300 transition-colors"
+                            >
+                              <span>👍 Helpful</span>
+                              <span className="font-mono text-cyan-400">({rev.helpfulCount || 0})</span>
+                            </button>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </section>
+
+              </div>
+
+              {/* Footer */}
+              <div className="p-4 border-t border-white/10 bg-slate-900/90 flex items-center justify-between">
+                <span className="text-[11px] text-slate-500 font-mono truncate mr-2">Model: {reviewModalModel.model_name}</span>
+                <button
+                  onClick={() => setReviewModalModel(null)}
+                  className="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-medium shrink-0"
+                >
+                  Close (Esc)
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* VIEW 4: SIMILAR MODELS DRAWER */}
+        {similarDrawerModel && (
+          <div className="fixed inset-0 z-50 overflow-hidden flex justify-end">
+            <div className="fixed inset-0 bg-black/70 backdrop-blur-sm cursor-pointer" onClick={() => setSimilarDrawerModel(null)} />
+            <div className="relative w-full max-w-lg bg-[#0E1424] border-l border-white/15 h-full overflow-y-auto shadow-2xl p-5 sm:p-6 flex flex-col space-y-5 z-10">
+              <div className="flex items-center justify-between pb-3 border-b border-white/10">
+                <div className="flex items-center space-x-2">
+                  <span className="text-xl text-cyan-400">⚡</span>
+                  <h2 className="text-base sm:text-lg font-bold text-white">Similar Model Discovery</h2>
+                </div>
+                <button onClick={() => setSimilarDrawerModel(null)} className="w-8 h-8 rounded-lg bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center text-sm">
+                  ✕
+                </button>
+              </div>
+
+              <div className="bg-slate-900/90 border border-cyan-500/30 rounded-xl p-4 space-y-2">
+                <div className="text-[11px] font-mono text-cyan-400 uppercase">Target Reference Model</div>
+                <div className="font-bold text-slate-100 text-base break-words">{similarDrawerModel.model_name}</div>
+                <div className="flex flex-wrap gap-2 text-xs">
+                  <span className="px-2 py-0.5 rounded bg-cyan-950 text-cyan-300">{similarDrawerModel.primary_domain}</span>
+                  <span className="px-2 py-0.5 rounded bg-violet-950 text-violet-300">{similarDrawerModel.sub_domain}</span>
+                </div>
+              </div>
+
+              <div className="space-y-4 flex-1">
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400">Nearest Topological Neighbors</h3>
+                {similarRecommendations.map(({ model: recModel, matchScore, overlaps }) => (
+                  <div key={recModel.id} className="bg-slate-900 border border-white/10 rounded-xl p-4 space-y-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="font-bold text-slate-100 text-sm break-words">{recModel.model_name}</div>
+                        <div className="text-xs text-slate-400 font-mono">Source: {recModel.source}</div>
+                      </div>
+                      <div className="px-2.5 py-1 rounded-full bg-cyan-950 text-cyan-300 border border-cyan-500/40 text-xs font-mono font-bold shrink-0">
+                        {matchScore}% Match
+                      </div>
+                    </div>
+                    <div className="bg-slate-950/60 rounded-lg p-2.5 space-y-1 text-xs">
+                      {overlaps.map((overlap, idx) => (
+                        <div key={idx} className="text-slate-300">✓ {overlap}</div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="pt-3 border-t border-white/10">
+                <button
+                  onClick={() => setSimilarDrawerModel(null)}
+                  className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-medium"
+                >
+                  Close Discovery Panel (Esc)
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Global Footer */}
+        <footer className="mt-auto border-t border-white/10 bg-slate-950/80 px-4 sm:px-8 py-8">
+          <div className="max-w-6xl mx-auto flex flex-col items-center text-center space-y-3">
+            <p className="text-xs sm:text-sm font-medium text-slate-300">
+              ModelFinder • Specialized High-Performance Scientific Model Discovery Index
+            </p>
+            <div className="pt-2 flex flex-wrap items-center justify-center gap-3 text-xs">
+              <span className="text-slate-400">Designed and Built by Jafar Irfan</span>
+              <a
+                href="mailto:jafudar48@gmail.com"
+                className="inline-flex items-center px-3 py-1 rounded-lg text-xs font-medium border border-cyan-500/40 text-cyan-400 bg-cyan-500/10 hover:bg-cyan-500/20 hover:border-cyan-300 shadow-[0_0_15px_rgba(6,182,212,0.25)] transition-all"
+                title="Send an email to Jafar Irfan"
+              >
+                Contact Me ✉️
+              </a>
+            </div>
+          </div>
+        </footer>
+
+      </div>
+    );
+  }
+
+  ReactDOM.render(<ModelFinderApp />, document.getElementById('root'));
+</script>
+</body></html>

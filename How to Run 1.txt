@@ -1,0 +1,6 @@
+open up terminal in server folder and run :
+
+uvicorn server:app --reload --port 8000
+and run http://localhost:8000
+
+the inside html folder run the index.html file ( No need to do this anymore 0
